@@ -130,7 +130,6 @@ class TelegramMattermostMigrator:
             self.logger.error(f"Failed to load config: {e}")
             raise
 
-
     def _date_to_epoch(self, tg_time: str) -> int:
         """Convert Telegram timestamp to Mattermost millisecond epoch."""
         dt = datetime.datetime.fromisoformat(tg_time)
@@ -406,7 +405,6 @@ class TelegramMattermostMigrator:
             self._add_attachments_to_zip(zf)
             self._add_jsonl_to_zip(zf, output_lines)
 
-
     def _add_attachments_to_zip(self, zf: zipfile.ZipFile) -> None:
         """Add attachments to ZIP file."""
         base_dir = self.input_dir
@@ -437,7 +435,6 @@ class TelegramMattermostMigrator:
         except Exception as e:
             self.logger.error(f"Failed to add JSONL file: {e}")
             raise
-
 
     def convert(self) -> None:
         """
@@ -502,11 +499,14 @@ def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
         with open(result_file) as f:
             data = json.load(f)
             if "type" not in data or "messages" not in data:
-                raise ValueError("result.json does not appear to be a valid Telegram export")
+                raise ValueError(
+                    "result.json does not appear to be a valid Telegram export"
+                )
     except json.JSONDecodeError:
         raise ValueError("result.json is not valid JSON")
 
     return config_file, result_file
+
 
 def main() -> None:
     """Main entry point for the script."""
@@ -523,18 +523,19 @@ Input Directory Requirements:
     parser = argparse.ArgumentParser(
         description="Convert Telegram export to Mattermost import format",
         epilog=epilog,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "input_dir",
         help="Directory containing Telegram export and configuration files",
-        type=Path
+        type=Path,
     )
     parser.add_argument(
-        "--output-file", "-o",
+        "--output-file",
+        "-o",
         type=Path,
         help="Output ZIP file path (default: %(default)s)",
-        default=ZIP_FILE_NAME
+        default=ZIP_FILE_NAME,
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
@@ -547,9 +548,7 @@ Input Directory Requirements:
     try:
         validate_input_dir(args.input_dir)
         migrator = TelegramMattermostMigrator(
-            Path(args.input_dir),
-            Path(args.output_file),
-            args.debug
+            Path(args.input_dir), Path(args.output_file), args.debug
         )
         migrator.convert()
     except ValueError as e:
