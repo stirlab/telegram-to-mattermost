@@ -309,7 +309,7 @@ class TelegramMattermostMigrator:
 
             for reply in replies[msg_id]:
                 try:
-                    transformed = self._transform_message(reply, replies)
+                    transformed = self._transform_message(reply, self.attachments)
                     if not transformed:
                         self.logger.warning(
                             f"Failed to transform reply {reply.get('id')} "
@@ -381,7 +381,7 @@ class TelegramMattermostMigrator:
             if msg.get("type") == "service":
                 continue
 
-            transformed = self._transform_message(msg, replies, self.attachments)
+            transformed = self._transform_message(msg, self.attachments)
             if transformed and "reply_to_message_id" not in msg:
                 self._attach_replies(transformed, replies)
                 output_lines.append(json.dumps(transformed))
