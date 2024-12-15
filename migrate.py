@@ -18,20 +18,22 @@ the Free Software Foundation, either version 3 of the License, or
 
 import json
 import datetime
-import tempfile
 import sys
 import zipfile
 import yaml
-import subprocess
-import time
 import re
 import logging
 import argparse
-import random
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Set, Tuple
 from zoneinfo import ZoneInfo
 from dataclasses import dataclass
+
+# File names.
+CONFIG_FILE_NAME = "config.yaml"
+JSON_FILE_NAME = "result.json"
+ZIP_FILE_NAME = "mattermost_import.zip"
+IMPORT_JSONL = "import.jsonl"
 
 
 @dataclass
@@ -41,27 +43,11 @@ class MattermostConfig:
     chat_type: str
     users: Dict[str, str]
     import_into: Dict[str, str]
-    attachment_base_dir: str
     timezone: str = "UTC"
 
 
 class TelegramMattermostMigrator:
     """Handles conversion of Telegram exports to Mattermost import format."""
-
-    # Default timeout for import jobs in seconds (1 hour)
-    DEFAULT_IMPORT_TIMEOUT = 3600
-
-    # Retry error conditions for mmctl commands
-    RETRY_ERRORS = {
-        "connection refused",
-        "connection reset by peer",
-        "connection timed out",
-        "temporary failure in name resolution",
-        "internal server error",
-        "bad gateway",
-        "service unavailable",
-        "gateway timeout",
-    }
 
     # Telegram to Mattermost type mappings
     TG_TO_MM_TYPE = {
@@ -89,10 +75,19 @@ class TelegramMattermostMigrator:
     # ZIP file configuration
     ZIP_SUBDIRS = ("photos", "files", "video_files", "voice_messages")
 
-    def __init__(self, config_path: str, debug: bool = False):
-        """Initialize the migrator with config file path."""
+    def __init__(self, input_dir: Path, output_file: Path, debug: bool = False):
+        """
+        Initialize the migrator with config file path and input directory.
+
+        Args:
+            input_dir: Path to the directory containing Telegram export
+            debug: Enable debug logging if True
+        """
         self.logger = self._setup_logging(debug)
-        self.config = self._load_config(config_path)
+        self.input_dir = input_dir
+        self.output_file = output_file
+        self.config_path = self.input_dir / CONFIG_FILE_NAME
+        self.config = self._load_config(self.config_path)
         self.attachments: Set[str] = set()
 
     def _setup_logging(self, debug: bool) -> logging.Logger:
@@ -115,7 +110,6 @@ class TelegramMattermostMigrator:
                 chat_type="direct_chat",  # Default value
                 users=config_data.get("users", {}),
                 import_into=config_data.get("import_into", {}),
-                attachment_base_dir="",
                 timezone=config_data.get("timezone", "UTC"),
             )
 
@@ -136,48 +130,6 @@ class TelegramMattermostMigrator:
             self.logger.error(f"Failed to load config: {e}")
             raise
 
-    def _run_mmctl(self, cmd: List[str]) -> Dict[str, Any]:
-        """
-        Execute mmctl command and return JSON response.
-        Implements robust error handling and retry logic.
-        """
-        cmd.append("--json")
-        max_retries = 5
-        base_delay = 1
-        max_delay = 30  # Maximum delay between retries in seconds
-        for attempt in range(max_retries):
-            try:
-                self.logger.debug(f"Executing mmctl command: {' '.join(cmd)}")
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, check=True, encoding="utf-8"
-                )
-                return json.loads(result.stdout)
-            except subprocess.CalledProcessError as e:
-                error_msg = e.stderr.lower()
-                retryable = any(err in error_msg for err in self.RETRY_ERRORS)
-
-                if retryable and attempt < max_retries - 1:
-                    # Calculate delay with exponential backoff and jitter
-                    delay = min(
-                        base_delay * (2**attempt) + (random.random() * 0.1), max_delay
-                    )
-                    self.logger.warning(
-                        f"Attempt {attempt + 1}/{max_retries} failed with error: {error_msg.strip()}. "
-                        f"Retrying in {delay:.1f}s..."
-                    )
-                    time.sleep(delay)
-                    continue
-
-                self.logger.error(f"mmctl command failed: {e.stderr}")
-                self.logger.error(f"Command output: {e.stdout}")
-                raise RuntimeError(f"mmctl command failed: {e.stderr}")
-            except json.JSONDecodeError as e:
-                self.logger.error(
-                    f"Failed to parse mmctl output. Command: {' '.join(cmd)}"
-                )
-                raise RuntimeError(
-                    f"Invalid JSON response from mmctl command: {str(e)}"
-                )
 
     def _date_to_epoch(self, tg_time: str) -> int:
         """Convert Telegram timestamp to Mattermost millisecond epoch."""
@@ -436,37 +388,32 @@ class TelegramMattermostMigrator:
 
         return output_lines
 
-    def _create_zip_file(self, output_lines: List[str]) -> str:
-        """Create ZIP file with messages and attachments."""
-        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
-            self.temp_zip_path = tmp_zip.name
-            self.logger.info(f"Creating temporary ZIP file: {tmp_zip.name}")
+    def _create_zip_file(self, output_lines: List[str]) -> None:
+        """Create ZIP file with messages and attachments at the specified path."""
+        self.logger.info(f"Creating ZIP file: {self.output_file}")
 
-            with zipfile.ZipFile(
-                tmp_zip,
-                "w",
-                compression=zipfile.ZIP_DEFLATED,
-                strict_timestamps=False,
-            ) as zf:
-                # Add directories
-                for dir_name in self.ZIP_SUBDIRS:
-                    zf.writestr(f"data/{dir_name}/", "")
-                    self.logger.debug(f"Created directory: data/{dir_name}/")
+        with zipfile.ZipFile(
+            self.output_file,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for dir_name in self.ZIP_SUBDIRS:
+                zf.writestr(f"data/{dir_name}/", "")
+                self.logger.debug(f"Created directory: data/{dir_name}/")
 
-                self._add_attachments_to_zip(zf)
-                self._add_jsonl_to_zip(zf, output_lines)
+            self._add_attachments_to_zip(zf)
+            self._add_jsonl_to_zip(zf, output_lines)
 
-            return tmp_zip.name
 
     def _add_attachments_to_zip(self, zf: zipfile.ZipFile) -> None:
         """Add attachments to ZIP file."""
-        base_dir = Path(self.config.attachment_base_dir)
+        base_dir = self.input_dir
         for attachment in self.attachments:
             attach_path = base_dir / attachment
             if not attach_path.exists():
                 self.logger.warning(f"Skipping missing attachment: {attachment}")
                 continue
-
             try:
                 safe_path = self._sanitize_filename(attachment)
                 zip_path = f"data/{safe_path}"
@@ -481,7 +428,7 @@ class TelegramMattermostMigrator:
         try:
             jsonl_content = "\n".join(output_lines)
             zf.writestr(
-                "mattermost_import.jsonl",
+                IMPORT_JSONL,
                 jsonl_content.encode("utf-8"),
                 compress_type=zipfile.ZIP_DEFLATED,
             )
@@ -490,93 +437,31 @@ class TelegramMattermostMigrator:
             self.logger.error(f"Failed to add JSONL file: {e}")
             raise
 
-    def _upload_to_mattermost(self, zip_path: str) -> None:
-        """Upload and process ZIP file in Mattermost."""
-        self.logger.info("Uploading to Mattermost...")
-        result = self._run_mmctl(["mmctl", "import", "upload", zip_path])
-        upload_id = result[0]["id"]
 
-        result = self._run_mmctl(["mmctl", "import", "list", "available"])
-        upload_file = next(f for f in result if f.startswith(upload_id))
-
-        result = self._run_mmctl(["mmctl", "import", "process", upload_file])
-        if result[0]["status"] != "pending":
-            raise RuntimeError("Import job failed to start")
-
-        self._monitor_import_job(result[0]["id"])
-
-    def _monitor_import_job(self, job_id: str, timeout: int = None) -> None:
+    def convert(self) -> None:
         """
-        Monitor Mattermost import job status.
+        Convert Telegram export to Mattermost import format.
 
         Args:
-            job_id: The ID of the import job to monitor
-            timeout: Maximum time in seconds to wait for job completion (default: 1 hour)
+            output_file: Optional path for output ZIP file. If None, uses 'mattermost_import.zip'
         """
-        timeout = timeout or self.DEFAULT_IMPORT_TIMEOUT
-        start_time = time.time()
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise TimeoutError(
-                    f"Import job {job_id} timed out after {int(elapsed)} seconds"
-                )
+        # Load and parse input data from result.json in input directory
+        input_file = self.input_dir / JSON_FILE_NAME
+        tg_data = self._load_telegram_data(str(input_file))
 
-            result = self._run_mmctl(["mmctl", "import", "job", "show", job_id])
-            status = result[0]["status"]
+        # Set chat type
+        self.config.chat_type = (
+            "direct_chat" if tg_data["type"] == "personal_chat" else "post"
+        )
 
-            self.logger.info(f"Import job status: {status}")
+        # Process messages
+        messages = tg_data["messages"]
+        replies = self._build_reply_structure(messages)
+        output_lines = self._convert_messages(messages, replies)
 
-            if status == "error":
-                error_details = result[0].get(
-                    "error_message", "No error details available"
-                )
-                self.logger.error(
-                    f"Mattermost import job failed. Job ID: {job_id}, Error: {error_details}"
-                )
-                raise RuntimeError(f"Import job failed: {error_details}")
-
-            if status == "success":
-                break
-
-            time.sleep(1)
-
-        self.logger.info("Import completed successfully")
-
-    def convert(self, input_file: Optional[str] = None) -> None:
-        """Convert Telegram export to Mattermost import format and upload."""
-        temp_files: List[Path] = []
-
-        try:
-            # Load and parse input data
-            tg_data = self._load_telegram_data(input_file)
-
-            # Set chat type
-            self.config.chat_type = (
-                "direct_chat" if tg_data["type"] == "personal_chat" else "post"
-            )
-
-            # Process messages
-            messages = tg_data["messages"]
-            replies = self._build_reply_structure(messages)
-            output_lines = self._convert_messages(messages, replies)
-
-            # Create and upload ZIP file
-            zip_path = self._create_zip_file(output_lines)
-            temp_files.append(Path(zip_path))
-            self._upload_to_mattermost(zip_path)
-
-        finally:
-            # Clean up all temporary files
-            for temp_file in temp_files:
-                try:
-                    if temp_file.exists():
-                        temp_file.unlink()
-                        self.logger.debug(f"Cleaned up temporary file: {temp_file}")
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to clean up temporary file {temp_file}: {e}"
-                    )
+        # Create ZIP file
+        self._create_zip_file(output_lines)
+        self.logger.info(f"Created Mattermost import file: {self.output_file}")
 
 
 def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
@@ -595,8 +480,8 @@ def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
     if not input_dir.is_dir():
         raise ValueError(f"Input directory does not exist: {input_dir}")
 
-    config_file = input_dir / "config.yaml"
-    result_file = input_dir / "result.json"
+    config_file = input_dir / CONFIG_FILE_NAME
+    result_file = input_dir / JSON_FILE_NAME
 
     if not config_file.exists():
         raise ValueError(
@@ -644,9 +529,14 @@ Input Directory Requirements:
         help="Directory containing Telegram export and configuration files",
         type=Path
     )
+    parser.add_argument(
+        "--output-file", "-o",
+        type=Path,
+        help="Output ZIP file path (default: %(default)s)",
+        default=ZIP_FILE_NAME
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
-    # If no arguments are provided, print help and exit
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
@@ -654,9 +544,13 @@ Input Directory Requirements:
     args = parser.parse_args()
 
     try:
-        config_file, input_file = validate_input_dir(args.input_dir)
-        migrator = TelegramMattermostMigrator(str(config_file), args.debug)
-        migrator.convert(str(input_file))
+        validate_input_dir(args.input_dir)
+        migrator = TelegramMattermostMigrator(
+            Path(args.input_dir),
+            Path(args.output_file),
+            args.debug
+        )
+        migrator.convert()
     except ValueError as e:
         print(f"Error: {str(e)}\n", file=sys.stderr)
         parser.print_help()
