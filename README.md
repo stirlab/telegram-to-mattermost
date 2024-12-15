@@ -45,15 +45,31 @@ The tool is currently working well (tested with versions between Mattermost 7.5.
 Synopsis
 --------
 
+Installation
+-----------
+
+```bash
+# Install package in development mode
+pip install -e ".[dev]"
+
+# Or install for regular usage
+pip install .
 ```
+
+Usage
+-----
+
+After installation, you can use the command-line tool:
+
+```bash
 # Basic usage
-./migrate.py /path/to/telegram_export
+telegram-to-mattermost /path/to/telegram_export
 
 # Enable debug logging
-./migrate.py --debug /path/to/telegram_export
+telegram-to-mattermost --debug /path/to/telegram_export
 
 # Specify custom output file (default is mattermost_import.zip)
-./migrate.py -o custom_output.zip /path/to/telegram_export
+telegram-to-mattermost -o custom_output.zip /path/to/telegram_export
 ```
 
 
