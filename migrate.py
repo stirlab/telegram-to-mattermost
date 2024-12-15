@@ -29,7 +29,7 @@ import logging
 import argparse
 import random
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Set
+from typing import List, Dict, Optional, Any, Set, Tuple
 from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 
@@ -579,24 +579,88 @@ class TelegramMattermostMigrator:
                     )
 
 
+def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
+    """
+    Validate input directory contains required Telegram export and config file.
+
+    Args:
+        input_dir: Path to input directory
+
+    Returns:
+        tuple containing paths to config.yaml and result.json
+
+    Raises:
+        ValueError: If directory structure is invalid or files are missing
+    """
+    if not input_dir.is_dir():
+        raise ValueError(f"Input directory does not exist: {input_dir}")
+
+    config_file = input_dir / "config.yaml"
+    result_file = input_dir / "result.json"
+
+    if not config_file.exists():
+        raise ValueError(
+            f"Config file not found: {config_file}\n"
+            "Please create a config.yaml file in the input directory."
+        )
+
+    if not result_file.exists():
+        raise ValueError(
+            f"Telegram export file not found: {result_file}\n"
+            "The input directory must contain a valid Telegram chat export "
+            "created using Telegram Desktop's 'Export Chat History' feature."
+        )
+
+    # Verify this appears to be a valid Telegram export
+    try:
+        with open(result_file) as f:
+            data = json.load(f)
+            if "type" not in data or "messages" not in data:
+                raise ValueError("result.json does not appear to be a valid Telegram export")
+    except json.JSONDecodeError:
+        raise ValueError("result.json is not valid JSON")
+
+    return config_file, result_file
+
 def main() -> None:
     """Main entry point for the script."""
+    epilog = """
+Input Directory Requirements:
+  The INPUT_DIR must contain:
+  - A valid Telegram chat export (result.json and associated media files)
+  - config.yaml: Configuration file for the Telegram to Mattermost conversion
+
+  The Telegram export should be created using Telegram Desktop's "Export Chat History"
+  feature, with JSON format selected. The config.yaml file should contain user mappings
+  and other settings needed for the conversion to Mattermost format.
+"""
     parser = argparse.ArgumentParser(
-        description="Convert Telegram export to Mattermost import format"
+        description="Convert Telegram export to Mattermost import format",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("config", help="Path to YAML config file")
     parser.add_argument(
-        "input_file",
-        nargs="?",
-        help="Telegram export JSON file (optional, stdin if not provided)",
+        "input_dir",
+        help="Directory containing Telegram export and configuration files",
+        type=Path
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+
+    # If no arguments are provided, print help and exit
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
 
     args = parser.parse_args()
 
     try:
-        migrator = TelegramMattermostMigrator(args.config, args.debug)
-        migrator.convert(args.input_file)
+        config_file, input_file = validate_input_dir(args.input_dir)
+        migrator = TelegramMattermostMigrator(str(config_file), args.debug)
+        migrator.convert(str(input_file))
+    except ValueError as e:
+        print(f"Error: {str(e)}\n", file=sys.stderr)
+        parser.print_help()
+        sys.exit(1)
     except Exception as e:
         logging.error(f"Migration failed: {e}")
         sys.exit(1)
