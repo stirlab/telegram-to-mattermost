@@ -254,6 +254,7 @@ class TelegramMattermostMigrator:
                 "message": text,
                 "user": self.config.users[msg["from_id"]],
                 "create_at": self._date_to_epoch(msg["date"]),
+                "edit_at": self._date_to_epoch(msg["edited"]) if "edited" in msg else 0,
             },
         }
 
