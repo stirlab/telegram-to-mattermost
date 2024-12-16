@@ -109,16 +109,16 @@ class TelegramMattermostMigrator:
         try:
             with open(config_path) as f:
                 config_data = yaml.safe_load(f)
-            if "users" not in config_data:
-                raise KeyError("Missing required field 'users' in config")
-            if "import_into" not in config_data:
-                raise KeyError("Missing required field 'import_into' in config")
             config = MattermostConfig(
                 chat_type=config_data.get("chat_type", "direct_chat"),
-                users=config_data["users"],
-                import_into=config_data["import_into"],
+                users=config_data.get("users"),
+                import_into=config_data.get("import_into"),
                 timezone=config_data.get("timezone", "UTC"),
             )
+            if not config.users:
+                raise KeyError("Missing required field 'users' in config")
+            if config.chat_type != "direct_chat" and not config.import_into:
+                raise KeyError("Missing required field 'import_into' in config")
 
             # Validate timezone
             try:
@@ -352,24 +352,24 @@ class TelegramMattermostMigrator:
     def _find_top_parent(self, msg_id: int, reply_map: Dict[int, int], visited: Optional[Set[int]] = None) -> int:
         """
         Recursively find the top-most parent message ID.
-        
+
         Args:
             msg_id: Current message ID
             reply_map: Dictionary mapping message IDs to their parent IDs
             visited: Set of already visited message IDs (to detect cycles)
-            
+
         Returns:
             The top-most parent message ID
         """
         if visited is None:
             visited = set()
-        
+
         # If we've seen this message before, we have a cycle
         if msg_id in visited:
             return msg_id
-            
+
         visited.add(msg_id)
-        
+
         if msg_id in reply_map:
             return self._find_top_parent(reply_map[msg_id], reply_map, visited)
         return msg_id

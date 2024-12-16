@@ -322,12 +322,52 @@ timezone: Invalid/Timezone
     with pytest.raises(ValueError, match="Invalid timezone"):
         TelegramMattermostMigrator(tmp_path, Path("output.zip"))
 
-def test_missing_required_config_fields(tmp_path):
-    """Test missing team/channel/users configuration."""
+def test_valid_direct_chat_config(tmp_path):
+    """Test valid direct chat configuration with minimal requirements."""
     config_file = tmp_path / "config.yaml"
-    config_file.write_text("timezone: UTC")
+    config_file.write_text("""
+users:
+  user123: abc
+chat_type: direct_chat
+""")
+    migrator = TelegramMattermostMigrator(tmp_path, Path("output.zip"))
+    assert migrator.config.users == {'user123': 'abc'}
+    assert migrator.config.chat_type == 'direct_chat'
 
-    with pytest.raises(KeyError):
+def test_valid_channel_config(tmp_path):
+    """Test valid channel configuration with all required fields."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("""
+users:
+  user123: abc
+chat_type: channel
+import_into:
+  team: example
+  channel: test
+""")
+    migrator = TelegramMattermostMigrator(tmp_path, Path("output.zip"))
+    assert migrator.config.chat_type == 'channel'
+    assert migrator.config.import_into == {'team': 'example', 'channel': 'test'}
+
+def test_config_missing_users(tmp_path):
+    """Test configuration validation when users field is missing."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("""
+chat_type: direct_chat
+timezone: UTC
+""")
+    with pytest.raises(KeyError, match="Missing required field 'users' in config"):
+        TelegramMattermostMigrator(tmp_path, Path("output.zip"))
+
+def test_channel_config_missing_import_into(tmp_path):
+    """Test channel configuration validation when import_into is missing."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("""
+users:
+  user123: abc
+chat_type: channel
+""")
+    with pytest.raises(KeyError, match="Missing required field 'import_into' in config"):
         TelegramMattermostMigrator(tmp_path, Path("output.zip"))
 
 def test_sanitize_filename(test_data_dir):

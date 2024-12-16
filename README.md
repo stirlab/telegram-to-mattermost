@@ -88,18 +88,23 @@ Configuration
 ```yaml
 # telegram-to-mattermost import configuration
 ---
+# Required.
+# For channel imports, include all users in the channel
+# For direct message imports, include only users in the direct message group.
 users:
   # In the following form:
   # telegram_user_id: mattermost_username
   user1234: annaiscool
   user4321: bertarocks
   user5678: charly
-
+# Required for any chat type that is not direct_chat
 import_into:
   team: your-team-name
   channel: town-square
-
+# Optional: Defaults to UTC.
 timezone: America/New_York
+# Optional: One of post, channel, direct_chat. Defaults to direct_chat
+chat_type: channel
 ```
 
 #### Configuration File Explanation
