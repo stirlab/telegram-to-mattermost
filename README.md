@@ -2,9 +2,7 @@
 
 ## Description
 
-Export Telegram chats into Mattermost import format.
-
-The Python script `migrate.py` converts [Telegram](https://telegram.org/) exports into an import format suitable for [Mattermost](https://mattermost.com/). It supports:
+Converts [Telegram](https://telegram.org/) exports into an import format suitable for [Mattermost](https://mattermost.com/). It supports:
 
 - Importing Telegram channels/supergroups into Mattermost channels
 - Importing Telegram personal chats into Mattermost direct messages
