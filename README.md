@@ -37,11 +37,13 @@ The tool is currently working well (tested with versions between Mattermost 7.5.
 
 ## Requirements
 
-* Python 3.9 or higher
+For the conversion from Telegram to Mattermost format:
 
+* Python 3.9 or higher
 * Python packages:
   * PyYAML
-  * Other dependencies from Python standard library
+
+For the import into Mattermost:
 
 * [Mattermost](https://mattermost.com/) server:
   * Mattermost 7.5.1 or higher recommended for proper attachment support
@@ -141,7 +143,7 @@ This script produces a ZIP file suitable for import into a Mattermost server. Se
 
 ## Author, License and Copyright
 
-Original Perl version: Axel Beckert <axel@ethz.ch>
+Original Perl version: Axel Beckert <axel@ethz.ch> -- [https://github.com/ETHZ-IT-SeC/telegram2mm](https://github.com/ETHZ-IT-SeC/telegram2mm)
 Python conversion: Chad Phillips, with great assistance from [Aider](https://aider.chat) and [Claude 3.5 Sonnet](https://www.anthropic.com/claude/sonnet)
 Copyright 2022-2024 ETH Zurich IT Security Center
 
