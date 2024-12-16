@@ -1,17 +1,13 @@
-Import Telegram Chats into Mattermost
-====================================
+# telegram-to-mattermost
 
-Description
------------
+## Description
+
+Export Telegram chats into Mattermost import format.
 
 The Python script `migrate.py` converts [Telegram](https://telegram.org/) exports into an import format suitable for [Mattermost](https://mattermost.com/). It supports:
 
 - Importing Telegram channels/supergroups into Mattermost channels
 - Importing Telegram personal chats into Mattermost direct messages
-
-
-State
------
 
 The tool is currently working well (tested with versions between Mattermost 7.5.1 and at least 10.2.1) but so far does not support all functionality which might be used on Telegram.
 
@@ -22,14 +18,14 @@ The tool is currently working well (tested with versions between Mattermost 7.5.
 - Support for attachments (images, videos, PDF, etc.)
 - Workaround for Telegram's export neither containing timezones nor DST flags. (This has been fixed in Telegram exports recently by also including the date in timezone independent Unix timestamps. `telegram-to-mattermost` does though currently not rely on them and hence still can import older Telegram exports without this additional field.)
 - Support for importing Telegram Personal Chats into Mattermost Direct Channels.
+- Support for voice messages (as attachments)
+- Support for video messages (as attachments)
 
 ### Untested
 
 - Importing non-private Supergroups. (Probably just works, but might be non-trivial wrt. to user management.)
 - Importing Telegram Forums, Basic Groups or Gigagroups.
 - Bots in groups
-- Support for voice messages
-- Support for video messages
 
 ### Not implemented
 
@@ -41,12 +37,29 @@ The tool is currently working well (tested with versions between Mattermost 7.5.
 - Import of users
 - Pinned messages.
 
+## Requirements
 
-Synopsis
---------
+* Python 3.9 or higher
 
-Installation
------------
+* Python packages:
+  * PyYAML
+  * Other dependencies from Python standard library
+
+* [Mattermost](https://mattermost.com/) server:
+  * Mattermost 7.5.1 or higher recommended for proper attachment support
+  * For attachments, configure appropriate file size limits:
+    ```
+    # In /opt/mattermost/config/config.defaults.json:
+    "MaxFileSize": 104857600,
+    ```
+    ```
+    # In /etc/nginx/conf.d/mattermost.conf if using Nginx:
+    client_max_body_size 1G;
+    ```
+
+* [Telegram Desktop](https://desktop.telegram.org/) application for creating the export
+
+## Installation
 
 ```bash
 # Install package in development mode
@@ -56,8 +69,7 @@ pip install -e ".[dev]"
 pip install .
 ```
 
-Usage
------
+## Usage
 
 After installation, you can use the command-line tool:
 
@@ -75,9 +87,7 @@ telegram-to-mattermost -o custom_output.zip /path/to/telegram_export
 telegram-to-mattermost -c custom_config.yaml /path/to/telegram_export
 ```
 
-
-Configuration
--------------
+## Configuration
 
 ### Configuration file
 
@@ -131,35 +141,10 @@ The export feature has been [introduced in Telegram Desktop 1.3.13 on 27th of Au
 
 This script produces a ZIP file suitable for import into a Mattermost server. See [Mattermost documentation](https://docs.mattermost.com) for instructions on how to handle upload/import into a Mattermost server.
 
-Requirements
-------------
-
-* Python 3.9 or higher
-
-* Python packages:
-  * PyYAML
-  * Other dependencies from Python standard library
-
-* [Mattermost](https://mattermost.com/) server:
-  * Mattermost 7.5.1 or higher recommended for proper attachment support
-  * For attachments, configure appropriate file size limits:
-    ```
-    # In /opt/mattermost/config/config.defaults.json:
-    "MaxFileSize": 104857600,
-    ```
-    ```
-    # In /etc/nginx/conf.d/mattermost.conf if using Nginx:
-    client_max_body_size 1G;
-    ```
-
-* [Telegram Desktop](https://desktop.telegram.org/) application for creating the export
-
-
-Author, License and Copyright
------------------------------
+## Author, License and Copyright
 
 Original Perl version: Axel Beckert <axel@ethz.ch>
-Python conversion: Chad Phillips
+Python conversion: Chad Phillips, with great assistance from [Aider](https://aider.chat) and [Claude 3.5 Sonnet](https://www.anthropic.com/claude/sonnet)
 Copyright 2022-2024 ETH Zurich IT Security Center
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
