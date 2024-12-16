@@ -342,12 +342,10 @@ class TelegramMattermostMigrator:
         except Exception as e:
             self.logger.error(f"Failed to attach replies to message {msg_id}: {e}")
 
-    def _load_telegram_data(self, input_file: Optional[str]) -> Dict:
+    def _load_telegram_data(self, input_file: str) -> Dict:
         """Load and parse Telegram export data."""
-        if input_file:
-            with open(input_file) as f:
-                return json.load(f)
-        return json.load(sys.stdin)
+        with open(input_file) as f:
+            return json.load(f)
 
     def _find_top_parent(self, msg_id: int, reply_map: Dict[int, int], visited: Optional[Set[int]] = None) -> int:
         """
