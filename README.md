@@ -70,6 +70,9 @@ telegram-to-mattermost --debug /path/to/telegram_export
 
 # Specify custom output file (default is mattermost_import.zip)
 telegram-to-mattermost -o custom_output.zip /path/to/telegram_export
+
+# Use a custom configuration file (default is config.yaml)
+telegram-to-mattermost -c custom_config.yaml /path/to/telegram_export
 ```
 
 

@@ -13,3 +13,5 @@ users:
 import_into:
   team: example
   channel: town square
+
+chat_type: channel

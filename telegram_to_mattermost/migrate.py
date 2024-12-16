@@ -75,18 +75,22 @@ class TelegramMattermostMigrator:
     # ZIP file configuration
     ZIP_SUBDIRS = ("photos", "files", "video_files", "voice_messages")
 
-    def __init__(self, input_dir: Path, output_file: Path, debug: bool = False):
+    def __init__(self, input_dir: Path, output_file: Path, config_file: str = CONFIG_FILE_NAME, debug: bool = False):
         """
         Initialize the migrator with config file path and input directory.
 
         Args:
             input_dir: Path to the directory containing Telegram export
+            output_file: Path where to write the output ZIP file
+            config_file: Name of config file to use (default: config.yaml)
             debug: Enable debug logging if True
         """
         self.logger = self._setup_logging(debug)
         self.input_dir = input_dir
         self.output_file = output_file
-        self.config_path = self.input_dir / CONFIG_FILE_NAME
+        self.config_file = config_file
+        self.debug = debug
+        self.config_path = self.input_dir / self.config_file
         self.config = self._load_config(self.config_path)
         self.attachments: Set[str] = set()
 
@@ -105,11 +109,14 @@ class TelegramMattermostMigrator:
         try:
             with open(config_path) as f:
                 config_data = yaml.safe_load(f)
-
+            if "users" not in config_data:
+                raise KeyError("Missing required field 'users' in config")
+            if "import_into" not in config_data:
+                raise KeyError("Missing required field 'import_into' in config")
             config = MattermostConfig(
-                chat_type="direct_chat",  # Default value
-                users=config_data.get("users", {}),
-                import_into=config_data.get("import_into", {}),
+                chat_type=config_data.get("chat_type", "direct_chat"),
+                users=config_data["users"],
+                import_into=config_data["import_into"],
                 timezone=config_data.get("timezone", "UTC"),
             )
 
@@ -261,12 +268,10 @@ class TelegramMattermostMigrator:
         if is_direct:
             mm_msg[msg_type]["channel_members"] = list(self.config.users.values())
         else:
-            mm_msg[msg_type].update(
-                {
-                    "channel": self.config.import_into["channel"],
-                    "team": self.config.import_into["team"],
-                }
-            )
+            mm_msg[msg_type].update({
+                "channel": self.config.import_into["channel"],
+                "team": self.config.import_into["team"],
+            })
 
         # Handle attachments
         for attach_type in ("file", "photo"):
@@ -344,10 +349,29 @@ class TelegramMattermostMigrator:
                 return json.load(f)
         return json.load(sys.stdin)
 
-    def _find_top_parent(self, msg_id: int, reply_map: Dict[int, int]) -> int:
-        """Recursively find the top-most parent message ID."""
+    def _find_top_parent(self, msg_id: int, reply_map: Dict[int, int], visited: Optional[Set[int]] = None) -> int:
+        """
+        Recursively find the top-most parent message ID.
+        
+        Args:
+            msg_id: Current message ID
+            reply_map: Dictionary mapping message IDs to their parent IDs
+            visited: Set of already visited message IDs (to detect cycles)
+            
+        Returns:
+            The top-most parent message ID
+        """
+        if visited is None:
+            visited = set()
+        
+        # If we've seen this message before, we have a cycle
+        if msg_id in visited:
+            return msg_id
+            
+        visited.add(msg_id)
+        
         if msg_id in reply_map:
-            return self._find_top_parent(reply_map[msg_id], reply_map)
+            return self._find_top_parent(reply_map[msg_id], reply_map, visited)
         return msg_id
 
     def _build_reply_structure(
@@ -369,7 +393,9 @@ class TelegramMattermostMigrator:
         for msg in messages:
             if "reply_to_message_id" in msg:
                 top_parent = self._find_top_parent(msg["reply_to_message_id"], reply_to)
-                replies.setdefault(top_parent, []).append(msg)
+                # Only add reply if the parent message exists in our message set
+                if top_parent in message_by_id:
+                    replies.setdefault(top_parent, []).append(msg)
 
         return replies
 
@@ -462,12 +488,13 @@ class TelegramMattermostMigrator:
         self.logger.info(f"Created Mattermost import file: {self.output_file}")
 
 
-def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
+def validate_input_dir(input_dir: Path, config_file: str = CONFIG_FILE_NAME) -> Tuple[Path, Path]:
     """
     Validate input directory contains required Telegram export and config file.
 
     Args:
         input_dir: Path to input directory
+        config_file: Name of config file to validate (default: config.yaml)
 
     Returns:
         tuple containing paths to config.yaml and result.json
@@ -478,13 +505,13 @@ def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
     if not input_dir.is_dir():
         raise ValueError(f"Input directory does not exist: {input_dir}")
 
-    config_file = input_dir / CONFIG_FILE_NAME
+    config_file_path = input_dir / config_file
     result_file = input_dir / JSON_FILE_NAME
 
-    if not config_file.exists():
+    if not config_file_path.exists():
         raise ValueError(
-            f"Config file not found: {config_file}\n"
-            "Please create a config.yaml file in the input directory."
+            f"Config file not found: {config_file_path}\n"
+            f"Please create a {config_file} file in the input directory."
         )
 
     if not result_file.exists():
@@ -505,7 +532,7 @@ def validate_input_dir(input_dir: Path) -> Tuple[Path, Path]:
     except json.JSONDecodeError:
         raise ValueError("result.json is not valid JSON")
 
-    return config_file, result_file
+    return config_file_path, result_file
 
 
 def main() -> None:
@@ -515,6 +542,7 @@ Input Directory Requirements:
   The INPUT_DIR must contain:
   - A valid Telegram chat export (result.json and associated media files)
   - config.yaml: Configuration file for the Telegram to Mattermost conversion
+                (or specified config file if using --config-file option)
 
   The Telegram export should be created using Telegram Desktop's "Export Chat History"
   feature, with JSON format selected. The config.yaml file should contain user mappings
@@ -537,6 +565,12 @@ Input Directory Requirements:
         help="Output ZIP file path (default: %(default)s)",
         default=ZIP_FILE_NAME,
     )
+    parser.add_argument(
+        "--config-file",
+        "-c",
+        help=f"Configuration file name (default: {CONFIG_FILE_NAME})",
+        default=CONFIG_FILE_NAME,
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     if len(sys.argv) == 1:
@@ -546,9 +580,12 @@ Input Directory Requirements:
     args = parser.parse_args()
 
     try:
-        validate_input_dir(args.input_dir)
+        validate_input_dir(args.input_dir, config_file=args.config_file)
         migrator = TelegramMattermostMigrator(
-            Path(args.input_dir), Path(args.output_file), args.debug
+            Path(args.input_dir),
+            Path(args.output_file),
+            args.config_file,
+            args.debug,
         )
         migrator.convert()
     except ValueError as e:
