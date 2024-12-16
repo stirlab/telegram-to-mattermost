@@ -101,6 +101,12 @@ users:
 import_into:
   team: your-team-name
   channel: town-square
+# Optional: Map @mentions to a specific @mention in  Mattermost
+# Note that Telegram 'mention name' text entities are handled by the 'users' mapping above,
+# this is for any other @mentions.
+# Format is the mention string without the @ symbol, then the Mattermost entity to mention.
+mentions:
+  something: someotherthing
 # Optional: Defaults to UTC.
 timezone: America/New_York
 # Optional: One of post, channel, direct_chat. Defaults to direct_chat

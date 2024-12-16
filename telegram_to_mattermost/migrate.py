@@ -42,6 +42,7 @@ class MattermostConfig:
 
     chat_type: str
     users: Dict[str, str]
+    mentions: Dict[str, str]
     import_into: Dict[str, str]
     timezone: str = "UTC"
 
@@ -63,7 +64,6 @@ class TelegramMattermostMigrator:
     TEXT_TYPES_TO_CONVERT_TO_PLAIN_TEXT = {
         "link",
         "bot_command",
-        "mention",
         "email",
         "text_link",
         "phone",
@@ -112,6 +112,7 @@ class TelegramMattermostMigrator:
             config = MattermostConfig(
                 chat_type=config_data.get("chat_type", "direct_chat"),
                 users=config_data.get("users"),
+                mentions=config_data.get("mentions"),
                 import_into=config_data.get("import_into"),
                 timezone=config_data.get("timezone", "UTC"),
             )
@@ -210,6 +211,14 @@ class TelegramMattermostMigrator:
                         result.append(f"@{self.config.users[user_id]}")
                     else:
                         self.logger.warning(f"Unknown user ID in mention: {user_id}")
+                elif elem_type == "mention":
+                    mention_text = elem_text.lstrip('@')
+                    if self.config.mentions and mention_text in self.config.mentions:
+                        result.append(f"@{self.config.mentions[mention_text]}")
+                    else:
+                        if self.config.mentions:
+                            self.logger.debug(f"No mapping found for mention: {elem_text}")
+                        result.append(elem_text)
                 elif elem_type == "blockquote":
                     result.append(f"\n> {elem_text}\n")
                 else:
