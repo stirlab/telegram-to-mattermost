@@ -143,6 +143,6 @@ This script produces a ZIP file suitable for import into a Mattermost server. Se
 
 ## Author, License and Copyright
 
-* Original Perl version: Axel Beckert <axel@ethz.ch> -- [https://github.com/ETHZ-IT-SeC/telegram2mm](https://github.com/ETHZ-IT-SeC/telegram2mm)
+* Original Perl version: Axel Beckert -- [https://github.com/ETHZ-IT-SeC/telegram2mm](https://github.com/ETHZ-IT-SeC/telegram2mm)
 * Python conversion: Chad Phillips, with great assistance from [Aider](https://aider.chat) and [Claude 3.5 Sonnet](https://www.anthropic.com/claude/sonnet)
 * See LICENSE for license information
