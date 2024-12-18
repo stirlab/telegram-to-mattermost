@@ -72,10 +72,73 @@ class TelegramMattermostMigrator:
         "bank_card",
     }
 
+    def _transform_basic_text(self, elem: Dict) -> str:
+        """Handle plain text, links, commands, etc."""
+        if elem["type"] in self.TEXT_TYPES_TO_CONVERT_TO_PLAIN_TEXT:
+            return elem["text"]
+        return ""
+
+    def _transform_formatting(self, elem: Dict) -> str:
+        """Handle bold, italic, underline, strikethrough."""
+        elem_type = elem["type"]
+        elem_text = elem["text"]
+        
+        format_map = {
+            "code": ("`", "`"),
+            "bold": ("**", "**"),
+            "italic": ("_", "_"),
+            "underline": ("**_", "_**"),
+            "strikethrough": ("~~", "~~"),
+        }
+        
+        if elem_type in format_map:
+            prefix, suffix = format_map[elem_type]
+            return f"{prefix}{elem_text}{suffix}"
+        return ""
+
+    def _transform_blocks(self, elem: Dict) -> str:
+        """Handle pre and blockquote elements."""
+        elem_type = elem["type"]
+        elem_text = elem["text"]
+        
+        if elem_type == "pre":
+            return f"\n```\n{elem_text}\n```\n"
+        elif elem_type == "blockquote":
+            return f"\n> {elem_text}\n"
+        return ""
+
+    def _transform_mentions(self, elem: Dict) -> str:
+        """Handle user mentions and mapped mentions."""
+        elem_type = elem["type"]
+        elem_text = elem["text"]
+        
+        if elem_type == "mention_name":
+            if "user_id" not in elem:
+                raise ValueError("mention_name element missing user_id")
+            user_id = f"user{elem['user_id']}"
+            if user_id in self.config.users:
+                return f"@{self.config.users[user_id]}"
+            self.logger.warning(f"Unknown user ID in mention: {user_id}")
+        elif elem_type == "mention":
+            mention_text = elem_text.lstrip("@")
+            if self.config.mentions and mention_text in self.config.mentions:
+                return f"@{self.config.mentions[mention_text]}"
+            if self.config.mentions:
+                self.logger.debug(f"No mapping found for mention: {elem_text}")
+            return elem_text
+        return ""
+
     # ZIP file configuration
     ZIP_SUBDIRS = ("photos", "files", "video_files", "voice_messages")
 
-    def __init__(self, input_dir: Path, output_file: Path, config_file: str = CONFIG_FILE_NAME, debug: bool = False):
+    def __init__(
+        self,
+        input_dir: Path,
+        output_file: Path,
+        config_file: str = CONFIG_FILE_NAME,
+        conversation_log: Optional[Path] = None,
+        debug: bool = False,
+    ):
         """
         Initialize the migrator with config file path and input directory.
 
@@ -83,12 +146,14 @@ class TelegramMattermostMigrator:
             input_dir: Path to the directory containing Telegram export
             output_file: Path where to write the output ZIP file
             config_file: Name of config file to use (default: config.yaml)
+            conversation_log: Path to conversation log
             debug: Enable debug logging if True
         """
         self.logger = self._setup_logging(debug)
         self.input_dir = input_dir
         self.output_file = output_file
         self.config_file = config_file
+        self.conversation_log = conversation_log
         self.debug = debug
         self.config_path = self.input_dir / self.config_file
         self.config = self._load_config(self.config_path)
@@ -162,11 +227,17 @@ class TelegramMattermostMigrator:
         # Reconstruct path with sanitized components
         return str(Path(*parts))
 
+    def _get_message_text(self, msg: Dict) -> str:
+        """Extract and transform message text content consistently."""
+        if isinstance(msg.get("text"), list):
+            return self._transform_text(msg["text"])
+        elif msg.get("text") == "" and "sticker_emoji" in msg:
+            return msg["sticker_emoji"]
+        else:
+            return msg.get("text", "")
+
     def _transform_text(self, text_elements: List[Any]) -> str:
-        """
-        Transform Telegram text formatting to Mattermost markdown.
-        Handles all supported text element types with proper error handling.
-        """
+        """Transform Telegram text formatting to Mattermost markdown."""
         result = []
 
         for elem in text_elements:
@@ -180,49 +251,23 @@ class TelegramMattermostMigrator:
 
             if "type" not in elem or "text" not in elem:
                 self.logger.warning(
-                    "Skipping text element missing required fields: "
-                    f"{json.dumps(elem)}"
+                    f"Skipping text element missing required fields: {json.dumps(elem)}"
                 )
                 continue
 
             try:
-                elem_type = elem["type"]
-                elem_text = elem["text"]
-
-                if elem_type in self.TEXT_TYPES_TO_CONVERT_TO_PLAIN_TEXT:
-                    result.append(elem_text)
-                elif elem_type == "code":
-                    result.append(f"`{elem_text}`")
-                elif elem_type == "bold":
-                    result.append(f"**{elem_text}**")
-                elif elem_type == "italic":
-                    result.append(f"_{elem_text}_")
-                elif elem_type == "underline":
-                    result.append(f"**_{elem_text}_**")
-                elif elem_type == "strikethrough":
-                    result.append(f"~~{elem_text}~~")
-                elif elem_type == "pre":
-                    result.append(f"\n```\n{elem_text}\n```\n")
-                elif elem_type == "mention_name":
-                    if "user_id" not in elem:
-                        raise ValueError("mention_name element missing user_id")
-                    user_id = f"user{elem['user_id']}"
-                    if user_id in self.config.users:
-                        result.append(f"@{self.config.users[user_id]}")
-                    else:
-                        self.logger.warning(f"Unknown user ID in mention: {user_id}")
-                elif elem_type == "mention":
-                    mention_text = elem_text.lstrip('@')
-                    if self.config.mentions and mention_text in self.config.mentions:
-                        result.append(f"@{self.config.mentions[mention_text]}")
-                    else:
-                        if self.config.mentions:
-                            self.logger.debug(f"No mapping found for mention: {elem_text}")
-                        result.append(elem_text)
-                elif elem_type == "blockquote":
-                    result.append(f"\n> {elem_text}\n")
+                # Try each transformation type in order
+                transformed = (
+                    self._transform_basic_text(elem)
+                    or self._transform_formatting(elem)
+                    or self._transform_blocks(elem)
+                    or self._transform_mentions(elem)
+                )
+                if transformed:
+                    result.append(transformed)
                 else:
-                    self.logger.warning(f"Unsupported text element type: {elem_type}")
+                    self.logger.warning(f"Unsupported text element type: {elem['type']}")
+                
             except Exception as e:
                 self.logger.error(
                     f"Error processing text element {json.dumps(elem)}: {str(e)}"
@@ -253,13 +298,7 @@ class TelegramMattermostMigrator:
             )
             return None
 
-        # Transform message content
-        if isinstance(msg.get("text"), list):
-            text = self._transform_text(msg["text"])
-        elif msg.get("text") == "" and "sticker_emoji" in msg:
-            text = msg["sticker_emoji"]
-        else:
-            text = msg.get("text", "")
+        text = self._get_message_text(msg)
 
         # Create message object
         mm_msg = {
@@ -277,10 +316,12 @@ class TelegramMattermostMigrator:
         if is_direct:
             mm_msg[msg_type]["channel_members"] = list(self.config.users.values())
         else:
-            mm_msg[msg_type].update({
-                "channel": self.config.import_into["channel"],
-                "team": self.config.import_into["team"],
-            })
+            mm_msg[msg_type].update(
+                {
+                    "channel": self.config.import_into["channel"],
+                    "team": self.config.import_into["team"],
+                }
+            )
 
         # Handle attachments
         for attach_type in ("file", "photo"):
@@ -356,7 +397,9 @@ class TelegramMattermostMigrator:
         with open(input_file) as f:
             return json.load(f)
 
-    def _find_top_parent(self, msg_id: int, reply_map: Dict[int, int], visited: Optional[Set[int]] = None) -> int:
+    def _find_top_parent(
+        self, msg_id: int, reply_map: Dict[int, int], visited: Optional[Set[int]] = None
+    ) -> int:
         """
         Recursively find the top-most parent message ID.
 
@@ -469,6 +512,93 @@ class TelegramMattermostMigrator:
             self.logger.error(f"Failed to add JSONL file: {e}")
             raise
 
+    def _write_conversation_log(
+        self, messages: List[Dict], replies: Dict[int, List[Dict]]
+    ) -> None:
+        """Write a text-only log of the conversation."""
+        if not self.conversation_log:
+            return
+
+        # Build a map of message IDs to their full text for reply lookups
+        msg_texts: Dict[int, str] = {}
+
+        def format_message_text(msg: Dict) -> str:
+            """Format the message text including any attachments."""
+            text = []
+
+            text.append(self._get_message_text(msg))
+
+            # Add attachments
+            for attach_type in ("file", "photo"):
+                if attach_type in msg and not (
+                    attach_type == "file" and msg.get("media_type") == "sticker"
+                ):
+                    attachment_path = Path(msg[attach_type])
+                    text.append(f"[{attach_type.upper()}: {attachment_path.name}]")
+
+            return "\n".join(filter(None, text))
+
+        def format_message(msg: Dict, indent: str = "") -> str:
+            """Format a single message with timestamp and username."""
+            if msg["type"] == "service":
+                return ""
+
+            if msg["from_id"] not in self.config.users:
+                return ""
+
+            timestamp = datetime.datetime.fromisoformat(msg["date"]).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            username = self.config.users[msg["from_id"]]
+
+            text = format_message_text(msg)
+            if not text:
+                return ""
+
+            # Store message text for reply lookups
+            if "id" in msg:
+                msg_texts[msg["id"]] = text.split("\n")[
+                    0
+                ]  # Store first line for reply context
+
+            # Format reply if this message is a reply
+            if "reply_to_message_id" in msg and msg["reply_to_message_id"] in msg_texts:
+                original = msg_texts[msg["reply_to_message_id"]]
+                text = f"> @{username}: {original}\n{text}"
+
+            return f"{indent}[{timestamp}] @{username}:\n{indent}{text}"
+
+        try:
+            with open(self.conversation_log, "w", encoding="utf-8") as f:
+                self.logger.info(f"Writing conversation log to: {self.conversation_log}")
+                # Write legend
+                f.write(
+                    """CONVERSATION LOG LEGEND
+----------------------
+Message format: [timestamp] @username: message
+Reply format: Messages starting with '>' are replies, multiple '>' indicate reply depth
+              Example: '>' = direct reply, '>>' = reply to reply
+Attachments: Indicated in brackets with type and filename
+  [PHOTO: sunset.jpg]
+  [VIDEO: meeting_recap.mp4]
+  [FILE: report.pdf]
+  [VOICE: message.ogg]
+----------------------
+
+"""
+                )
+
+                # Write messages
+                for msg in messages:
+                    formatted = format_message(msg)
+                    if formatted:
+                        f.write(f"{formatted}\n\n")
+                
+                self.logger.info(f"Successfully wrote conversation log to: {self.conversation_log}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to write conversation log: {e}")
+
     def convert(self) -> None:
         """
         Convert Telegram export to Mattermost import format.
@@ -488,6 +618,11 @@ class TelegramMattermostMigrator:
         # Process messages
         messages = tg_data["messages"]
         replies = self._build_reply_structure(messages)
+
+        # Write conversation log if requested
+        if self.conversation_log:
+            self._write_conversation_log(messages, replies)
+
         output_lines = self._convert_messages(messages, replies)
 
         # Create ZIP file
@@ -495,7 +630,9 @@ class TelegramMattermostMigrator:
         self.logger.info(f"Created Mattermost import file: {self.output_file}")
 
 
-def validate_input_dir(input_dir: Path, config_file: str = CONFIG_FILE_NAME) -> Tuple[Path, Path]:
+def validate_input_dir(
+    input_dir: Path, config_file: str = CONFIG_FILE_NAME
+) -> Tuple[Path, Path]:
     """
     Validate input directory contains required Telegram export and config file.
 
@@ -578,6 +715,11 @@ Input Directory Requirements:
         help=f"Configuration file name (default: {CONFIG_FILE_NAME})",
         default=CONFIG_FILE_NAME,
     )
+    parser.add_argument(
+        "--conversation-log",
+        type=Path,
+        help="Write a text-only log of the conversation to this file",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     if len(sys.argv) == 1:
@@ -592,6 +734,7 @@ Input Directory Requirements:
             Path(args.input_dir),
             Path(args.output_file),
             args.config_file,
+            args.conversation_log,
             args.debug,
         )
         migrator.convert()

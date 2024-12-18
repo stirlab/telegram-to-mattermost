@@ -85,6 +85,9 @@ telegram-to-mattermost -o custom_output.zip /path/to/telegram_export
 
 # Use a custom configuration file (default is config.yaml)
 telegram-to-mattermost -c custom_config.yaml /path/to/telegram_export
+
+# Generate a human-readable conversation log
+telegram-to-mattermost --conversation-log chat_history.log /path/to/telegram_export
 ```
 
 ## Configuration
@@ -140,6 +143,26 @@ The export feature has been [introduced in Telegram Desktop 1.3.13 on 27th of Au
 ### Importing into Mattermost
 
 This script produces a ZIP file suitable for import into a Mattermost server. See [Mattermost documentation](https://docs.mattermost.com) for instructions on how to handle upload/import into a Mattermost server.
+
+### Conversation Logs
+
+The tool can generate a human-readable log file of the conversation alongside the Mattermost import file. This log:
+- Shows messages in chronological order with timestamps and usernames
+- Preserves message formatting (bold, italic, etc.)
+- Indicates file attachments
+- Shows reply chains with indentation
+- Uses a consistent, easy-to-read format
+
+Example log format:
+```
+[2022-03-15 06:06:11] @username:
+Hello **world** with _formatting_
+[PHOTO: sunset.jpg]
+
+[2022-03-15 06:07:11] @otheruser:
+> @username: Hello world
+This is a reply
+```
 
 ## Author, License and Copyright
 
